@@ -24,10 +24,11 @@
 						$.ajax({
 							url : "/verifier/verifier",
 							type : "post",
+							contentType : 'application/json',
 							dataType : "json",
-							data : {
-								assertion : assertion
-							},
+							data : JSON.stringify({
+								"assertion" : assertion
+							}),
 							success : function(data, textStatus, jqXHR) {
 								if(data.verified){
 									$("#results").text(

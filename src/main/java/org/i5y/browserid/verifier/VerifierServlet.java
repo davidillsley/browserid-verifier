@@ -1,34 +1,34 @@
 package org.i5y.browserid.verifier;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.URI;
 
+import javax.json.JsonObject;
+import javax.json.JsonReader;
+import javax.json.JsonString;
+import javax.json.stream.JsonGenerator;
 import javax.servlet.ServletException;
-import javax.servlet.ServletInputStream;
-import javax.servlet.annotation.WebServlet;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.i5y.browserid.verifier.Verifier.Results;
-import org.i5y.json.stream.impl.JSONStreamFactoryImpl;
+import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.handler.HandlerList;
+import org.eclipse.jetty.servlet.DefaultServlet;
+import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.servlet.ServletHolder;
 
-@WebServlet(name = "verifier", urlPatterns = { "/verifier" })
 public class VerifierServlet extends HttpServlet {
 	private static final long serialVersionUID = 1L;
 
-	/**
-	 * @see HttpServlet#doPost(HttpServletRequest request, HttpServletResponse
-	 *      response)
-	 */
+	private final Verifier verifier = new Verifier(Clock.current(),
+			Certificates.newCache());
+
 	protected void doPost(HttpServletRequest request,
 			HttpServletResponse response) throws ServletException, IOException {
 
 		URI requestURI = URI.create(request.getRequestURL().toString());
-
-		String bundle = getCertAndAssertion(request);
 
 		int requestPort = requestURI.getPort();
 
@@ -38,26 +38,38 @@ public class VerifierServlet extends HttpServlet {
 				+ (requestPort == 80 || requestPort <= 0 ? "" : ":"
 						+ requestURI.getPort());
 
-		Results results = Verifier.verify(bundle, expectedAudience);
+		String bundle = ((JsonObject) new JsonReader(request.getReader())
+				.readObject()).getValue("assertion", JsonString.class)
+				.getValue();
+
+		String results = verifier.verify(bundle, expectedAudience);
 		response.setContentType("application/json");
-		new JSONStreamFactoryImpl().createObjectWriter(response.getWriter())
-				.startObject().defineProperty("verified")
-				.literal(results.verified).defineProperty("identity")
-				.literal(results.identity).endObject().close();
+		new JsonGenerator(response.getWriter()).beginObject()
+				.add("verified", results.length() > 0).add("identity", results)
+				.endObject().close();
 	}
 
-	private String getCertAndAssertion(HttpServletRequest request)
-			throws ServletException, IOException {
-		String full = "";
-		ServletInputStream inputStream = request.getInputStream();
-		BufferedReader br = new BufferedReader(new InputStreamReader(
-				inputStream));
-		String line = br.readLine();
-		while (line != null) {
-			full += line;
-			// System.out.println(line);
-			line = br.readLine();
-		}
-		return full.trim().split("=")[1];
+	public static void main(String[] args) throws Exception {
+		int port = 5000;
+		Server server = new Server(port);
+
+		ServletContextHandler context = new ServletContextHandler(
+				ServletContextHandler.SESSIONS);
+		context.setContextPath("/");
+
+		context.addServlet(new ServletHolder(new VerifierServlet()),
+				"/verifier/verifier");
+		ServletHolder defaultServletHolder = new ServletHolder(
+				new DefaultServlet());
+		defaultServletHolder
+				.setInitParameter("resourceBase", "src/main/webapp");
+		context.addServlet(defaultServletHolder, "/");
+
+		HandlerList handlers = new HandlerList();
+		handlers.setHandlers(new Handler[] { context });
+		server.setHandler(handlers);
+
+		server.start();
+		server.join();
 	}
 }
